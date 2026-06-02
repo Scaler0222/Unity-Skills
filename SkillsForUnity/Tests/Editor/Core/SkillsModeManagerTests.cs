@@ -30,7 +30,7 @@ namespace UnitySkills.Tests.Core
     {
         // Pre-v1.9 EditorPrefs keys that mark an "existing install" (plan section 10
         // / SkillsModeManager.IsExistingInstall). Presence of any of these flips the
-        // default mode from Approval (fresh install) to Bypass (upgrade-compat).
+        // default mode from Auto (fresh install) to Bypass (upgrade-compat).
         private static readonly string[] LegacyInstallKeys =
         {
             "UnitySkills_RequireConfirmation",
@@ -64,7 +64,7 @@ namespace UnitySkills.Tests.Core
         public void SetUp()
         {
             // Force IsExistingInstall() == false so the default mode getter returns
-            // Approval unless a test explicitly opts back into "old install" state.
+            // Auto unless a test explicitly opts back into "old install" state.
             foreach (var k in LegacyInstallKeys) EditorPrefs.DeleteKey(k);
             SkillsModeManager.ResetForTests();
             SkillsAuditLog.ResetForTests();
@@ -131,7 +131,8 @@ namespace UnitySkills.Tests.Core
                 SkillsModeManager.CheckAccess(MakeSkill("reload", mayTriggerReload: true)));
             Assert.AreEqual(SkillsModeManager.AccessResult.Allowed,
                 SkillsModeManager.CheckAccess(MakeSkill("high_risk", risk: "high")));
-            // explicit "never in semi" list (e.g. scene_clear)
+            // a former never-list name (scene_clear) — no longer auto-forbidden after the
+            // _explicitNeverList removal, but Bypass allows it like any other skill anyway.
             Assert.AreEqual(SkillsModeManager.AccessResult.Allowed,
                 SkillsModeManager.CheckAccess(MakeSkill("scene_clear")));
         }
@@ -311,11 +312,13 @@ namespace UnitySkills.Tests.Core
             // v1.9.x removed the historical _explicitNeverList (scene_clear/scene_new/
             // batch_apply) — see SkillsModeManager.cs:89-94. Forbidden now means a
             // metadata flag is set (Operation=Delete / MayEnterPlayMode / MayTriggerReload
-            // / RiskLevel=high). Cover two distinct flavours to exercise the OR-branch.
+            // / RiskLevel=high). Cover multiple distinct flavours to exercise the OR-branch.
             Assert.AreEqual(SkillsModeManager.AccessResult.Forbidden,
                 SkillsModeManager.CheckAccess(MakeSkill("delete_thing", op: SkillOperation.Delete)));
             Assert.AreEqual(SkillsModeManager.AccessResult.Forbidden,
                 SkillsModeManager.CheckAccess(MakeSkill("reload_scene", mayTriggerReload: true)));
+            Assert.AreEqual(SkillsModeManager.AccessResult.Forbidden,
+                SkillsModeManager.CheckAccess(MakeSkill("hot_skill", risk: "high")));
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -474,14 +477,14 @@ namespace UnitySkills.Tests.Core
         }
 
         // ═════════════════════════════════════════════════════════════════
-        //  Test matrix #17 — Fresh install (no legacy, no explicit) → Approval
+        //  Test matrix #17 — Fresh install (no legacy, no explicit) → Auto
         // ═════════════════════════════════════════════════════════════════
 
         [Test]
-        public void CurrentMode_FreshInstall_NoKeys_DefaultsToApproval()
+        public void CurrentMode_FreshInstall_NoKeys_DefaultsToAuto()
         {
             // SetUp left zero UnitySkills_* keys behind.
-            Assert.AreEqual(SkillsOperatingMode.Approval, SkillsModeManager.CurrentMode);
+            Assert.AreEqual(SkillsOperatingMode.Auto, SkillsModeManager.CurrentMode);
             Assert.IsFalse(EditorPrefs.HasKey(PrefKeyMode));
         }
 
@@ -597,16 +600,24 @@ namespace UnitySkills.Tests.Core
             // v1.9.x is metadata-only — use a metadata-forbidden skill instead of
             // the now-defunct explicit never-list name ("scene_clear"). See
             // SkillsModeManager.cs:89-94 for the rationale on removing the list.
-            const string skill = "delete_thing";
+            const string deleteSkill = "delete_thing";
 
             // 默认拦截（metadata flag → Forbidden）
             Assert.AreEqual(SkillsModeManager.AccessResult.Forbidden,
-                SkillsModeManager.CheckAccess(MakeSkill(skill, op: SkillOperation.Delete)));
+                SkillsModeManager.CheckAccess(MakeSkill(deleteSkill, op: SkillOperation.Delete)));
 
             // 加入 Allowlist 后被放行（Allowlist 优先于 IsForbiddenInSemi）
-            Assert.IsTrue(SkillsModeManager.AddToAllowlist(skill));
+            Assert.IsTrue(SkillsModeManager.AddToAllowlist(deleteSkill));
             Assert.AreEqual(SkillsModeManager.AccessResult.Allowed,
-                SkillsModeManager.CheckAccess(MakeSkill(skill, op: SkillOperation.Delete)));
+                SkillsModeManager.CheckAccess(MakeSkill(deleteSkill, op: SkillOperation.Delete)));
+
+            // RiskLevel="high" 也同样可被 Allowlist 放行
+            const string highRiskSkill = "hot_skill";
+            Assert.AreEqual(SkillsModeManager.AccessResult.Forbidden,
+                SkillsModeManager.CheckAccess(MakeSkill(highRiskSkill, risk: "high")));
+            Assert.IsTrue(SkillsModeManager.AddToAllowlist(highRiskSkill));
+            Assert.AreEqual(SkillsModeManager.AccessResult.Allowed,
+                SkillsModeManager.CheckAccess(MakeSkill(highRiskSkill, risk: "high")));
 
             // 高危 mayTriggerReload 也同样可被 Allowlist 放行
             const string reloadSkill = "reload_scene";
@@ -805,6 +816,65 @@ namespace UnitySkills.Tests.Core
             CollectionAssert.IsEmpty(snapshot);
             Assert.IsTrue(EditorPrefs.GetBool(PrefKeyMigrationDone, false),
                 "Done flag must still be set on fresh install so future reads skip migration");
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        //  Test matrix #23 — AllowlistPresets「辅助代码编写包」内容 + 导入后放行
+        // ═════════════════════════════════════════════════════════════════
+
+        [Test]
+        public void AllowlistPresets_CodingAssist_IsNonEmptyDistinct_AndMergesBothGroups()
+        {
+            var pack = AllowlistPresets.CodingAssist;
+            Assert.IsNotNull(pack);
+            Assert.Greater(pack.Length, 0, "Coding Assist pack must not be empty");
+            CollectionAssert.AllItemsAreNotNull(pack);
+
+            // 无重复（忽略大小写）
+            var distinct = pack.Distinct(System.StringComparer.OrdinalIgnoreCase).ToArray();
+            Assert.AreEqual(pack.Length, distinct.Length, "Coding Assist pack must have no duplicates");
+
+            // CodingAssist == 组A + 组B
+            CollectionAssert.AreEquivalent(
+                AllowlistPresets.ScriptWrite.Concat(AllowlistPresets.InspectorSet).ToArray(),
+                pack);
+        }
+
+        [Test]
+        public void AllowlistPresets_ImportingPack_AllowsForbiddenAndGrantSkills_UnderApproval()
+        {
+            SkillsModeManager.CurrentMode = SkillsOperatingMode.Approval;
+
+            // 组A（脚本写）模拟为 NeverInSemi：导入前 Forbidden
+            var scriptWriteSample = MakeSkill(AllowlistPresets.ScriptWrite[0],
+                mayTriggerReload: true, risk: "high");
+            Assert.AreEqual(SkillsModeManager.AccessResult.Forbidden,
+                SkillsModeManager.CheckAccess(scriptWriteSample),
+                "Script-write skill must be forbidden before import");
+
+            // 组B（Inspector 赋值）模拟为 FullAuto 非 forbidden：导入前 NeedsGrant
+            var inspectorSample = MakeSkill(AllowlistPresets.InspectorSet[0],
+                op: SkillOperation.Create);
+            Assert.AreEqual(SkillsModeManager.AccessResult.NeedsGrant,
+                SkillsModeManager.CheckAccess(inspectorSample),
+                "Inspector-set skill must need grant before import");
+
+            // 模拟"导入辅助代码编写包"：逐个加入 Allowlist
+            foreach (var name in AllowlistPresets.CodingAssist)
+                SkillsModeManager.AddToAllowlist(name);
+
+            // 导入后：组A + 组B 全部放行（Allowlist 命中优先于 forbidden / grant）
+            Assert.AreEqual(SkillsModeManager.AccessResult.Allowed,
+                SkillsModeManager.CheckAccess(scriptWriteSample),
+                "Script-write skill must be allowed after import");
+            Assert.AreEqual(SkillsModeManager.AccessResult.Allowed,
+                SkillsModeManager.CheckAccess(inspectorSample),
+                "Inspector-set skill must be allowed after import");
+
+            // 包内每一项都已在白名单
+            foreach (var name in AllowlistPresets.CodingAssist)
+                Assert.IsTrue(SkillsModeManager.IsInAllowlist(name),
+                    "Pack member must be in allowlist after import: " + name);
         }
     }
 }

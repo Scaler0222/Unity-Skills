@@ -35,13 +35,8 @@ namespace UnitySkills.Tests.Core
             "bookmark",
             "history",
             "shadergraph-design",
-            // Issue #1: these five "-design" modules all self-label as
-            // "Advisory module" in their SKILL.md front-matter and contain
-            // zero `### skill_name` blocks — they are pattern/rule docs for
-            // the AI to read, not skill catalogs that need schema-first
-            // `Exact Signatures` pointers. Grouping them with `shadergraph-design`
-            // (the existing precedent) instead of stamping each SKILL.md with
-            // boilerplate.
+            // 以下 *-design 均为纯设计指南（0 个 ### skill 端点定义），与 shadergraph-design 同质，
+            // 统一豁免 schema-first（Exact Signatures）校验，避免误报。
             "addressables-design",
             "dotween-design",
             "netcode-design",
@@ -225,6 +220,21 @@ namespace UnitySkills.Tests.Core
                    name.IndexOf('*') >= 0;
         }
 
+        private static string StripParameterShorthand(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return name;
+
+            var eqIdx = name.IndexOf('=');
+            if (eqIdx >= 0)
+                name = name.Substring(0, eqIdx);
+
+            if (name.EndsWith("?", StringComparison.Ordinal))
+                name = name.Substring(0, name.Length - 1);
+
+            return name.Trim();
+        }
+
         private static Dictionary<string, CodeSkill> LoadCodeSkills()
         {
             var result = new Dictionary<string, CodeSkill>(StringComparer.Ordinal);
@@ -385,6 +395,7 @@ namespace UnitySkills.Tests.Core
                 foreach (Match match in Regex.Matches(remainder, @"`(?<name>[^`]+)`"))
                 {
                     var name = match.Groups["name"].Value.Trim();
+                    name = StripParameterShorthand(name);
                     if (!string.IsNullOrEmpty(name))
                     {
                         parameters[name] = new DocParameter { Name = name, Type = string.Empty, Required = true };

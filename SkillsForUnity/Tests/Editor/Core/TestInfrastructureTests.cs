@@ -102,8 +102,22 @@ namespace UnitySkills.Tests.Core
         [Test]
         public void TestRun_WhenAnotherRunIsActive_ReturnsErrorInsteadOfStartingConcurrentRunner()
         {
+            const string testFolder = "Assets/Temp/RealValidation";
+
+            // 确保临时目录存在
+            if (!AssetDatabase.IsValidFolder(testFolder))
+            {
+                var parentFolder = "Assets/Temp";
+                if (!AssetDatabase.IsValidFolder(parentFolder))
+                {
+                    AssetDatabase.CreateFolder("Assets", "Temp");
+                }
+                AssetDatabase.CreateFolder(parentFolder, "RealValidation");
+                AssetDatabase.Refresh();
+            }
+
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            var cleanScenePath = "Assets/CodexTemp/RealValidation/ActiveJobGuardScene.unity";
+            var cleanScenePath = "Assets/Temp/RealValidation/ActiveJobGuardScene.unity";
             Assert.That(EditorSceneManager.SaveScene(SceneManager.GetActiveScene(), cleanScenePath), Is.True);
 
             var jobId = Guid.NewGuid().ToString("N").Substring(0, 8);
@@ -120,6 +134,24 @@ namespace UnitySkills.Tests.Core
             finally
             {
                 BatchPersistence.RemoveJob(jobId);
+
+                // 清理临时目录
+                if (AssetDatabase.IsValidFolder(testFolder))
+                {
+                    AssetDatabase.DeleteAsset(testFolder);
+                }
+
+                // 如果 Temp 父目录为空，也删除
+                if (AssetDatabase.IsValidFolder("Assets/Temp"))
+                {
+                    var subFolders = AssetDatabase.GetSubFolders("Assets/Temp");
+                    if (subFolders.Length == 0)
+                    {
+                        AssetDatabase.DeleteAsset("Assets/Temp");
+                    }
+                }
+
+                AssetDatabase.Refresh();
             }
         }
 
@@ -258,20 +290,19 @@ namespace UnitySkills.Tests.Core
         [Test]
         public void TestList_WhenNoCachedDiscoveryExists_StartsAsyncDiscovery()
         {
-            // R4 quarantine (issue #1 PR#1 → issue #2 follow-up).
-            // BatchPersistence keeps discovery jobs in a static in-memory cache that
-            // leaks across tests (BatchPersistence.cs:16-22, BatchJobService.cs:22-27).
-            // This test assumes a fresh cache but routinely sees a sibling test's
-            // populated state. Removing the leak is a non-trivial design change
-            // tracked in https://github.com/Scaler0222/Unity-Skills/issues/2.
-            Assert.Ignore("Quarantined — tracked in #2 (BatchPersistence discovery-cache leaks across tests).");
+            var existingDiscoveries = BatchPersistence.ListJobs(200)
+                .Where(j => j != null && string.Equals(j.kind, "test_discovery", System.StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            foreach (var d in existingDiscoveries)
+                BatchPersistence.RemoveJob(d.jobId);
 
             var json = ToJObject(TestSkills.TestList(limit: 10));
-            Assert.That(json["success"]?.Value<bool>(), Is.False);
+            Assert.That(json["success"]?.Value<bool>(), Is.True);
+            Assert.That(json["pendingDiscovery"]?.Value<bool>(), Is.True);
             var discoveryJobId = json["discoveryJobId"]?.ToString();
             Assert.That(discoveryJobId, Is.Not.Null.And.Not.Empty);
             Assert.That(json["discoveryMode"]?.ToString(), Is.EqualTo("unity_test_runner_async_cache"));
-            StringAssert.Contains("No cached Unity Test Runner discovery result", json["error"]?.ToString());
+            StringAssert.Contains("No cached Unity Test Runner discovery result", json["message"]?.ToString());
             BatchPersistence.RemoveJob(discoveryJobId);
         }
 

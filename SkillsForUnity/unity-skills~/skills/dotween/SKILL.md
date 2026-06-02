@@ -125,3 +125,8 @@ Remove one DOTweenAnimation component by index.
 | `Color / CameraBackgroundColor` | `endValueColor` (`"#FF8800"` or `"1,0.5,0,1"`) |
 | `Text` | `endValueString` |
 | `UIRect` | `endValueRect` (`"x,y,width,height"`) |
+
+---
+## Exact Signatures
+
+Exact names, parameters, defaults, and returns are defined by `GET /skills/schema` or `unity_skills.get_skill_schema()`, not by this file.

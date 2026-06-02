@@ -7,7 +7,7 @@
 
 | 项目 | 值 |
 |------|----|
-| 版本 | 1.9.2 |
+| 版本 | 2.0.0 |
 | 技术栈 | C# (Unity Editor Plugin) + Python (Client) |
 | Unity | 2022.3+（已验证 Unity 6 / 6000.x） |
 | 协议 | MIT |
@@ -44,6 +44,7 @@ Unity-Skills/
 │   │   ├── Skills/                       # Skill 业务层 + Server 内核
 │   │   │   ├── SkillsHttpServer.cs       # HTTP 服务器 (Producer-Consumer)
 │   │   │   ├── SkillRouter.cs            # 反射路由 + 参数绑定
+│   │   │   ├── SkillPlanningService.cs   # SkillRouter 内部预演引擎 (/plan /dryRun + 参数语义校验，非 skill，无 [UnitySkill])
 │   │   │   ├── UnitySkillAttribute.cs    # [UnitySkill] 特性 (元数据契约)
 │   │   │   ├── SkillErrorResponse.cs     # 统一错误响应构建器
 │   │   │   ├── SkillErrorCode.cs         # 错误码枚举
@@ -127,7 +128,7 @@ public static object SkillName(string name, float x = 0f) { ... }
 
 ### 4. 常量与日志源
 
-- **版本号唯一源**：`SkillsLogger.Version`。`SkillsHttpServer`(`/health`)、`SkillRouter`(`/skills` manifest) 等均引此常量。**禁止硬编码 "1.9.2" 等字面量**。
+- **版本号唯一源**：`SkillsLogger.Version`。`SkillsHttpServer`(`/health`)、`SkillRouter`(`/skills` manifest) 等均引此常量。**禁止硬编码 "1.9.3" 等字面量**。
 - **日志走 `SkillsLogger`**：`Log` / `LogWarning` / `LogError` / `LogVerbose` / `LogAgent`，禁止直调 `Debug.Log*`；前缀颜色用 `PREFIX_*` 常量。
 - **EditorPrefs key 前缀**：统一 `UnitySkills_*`（用于"老安装"检测，参见 `PermissionUiHelpers.IsExistingInstall()`）。
 
@@ -147,7 +148,7 @@ public static object SkillName(string name, float x = 0f) { ... }
 
 ## 操作模式 (v1.9+)
 
-服务端权限系统，对齐 Claude Code permission modes。三档（默认 Approval；老安装升级默认 Bypass；新装默认 Auto——三者由 `SkillsModeManager` 决策）：
+服务端权限系统，对齐 Claude Code permission modes。三档（新安装默认 Auto；老安装升级默认 Bypass；从不默认 Approval——由 `SkillsModeManager.CurrentMode` 决策，见 `:143`）：
 
 | 模式 | 行为（针对 FullAuto skill） |
 |------|------|

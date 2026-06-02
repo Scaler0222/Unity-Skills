@@ -257,28 +257,64 @@ namespace UnitySkills.Tests.Core
         [Test]
         public void SceneDiff_SnapshotOnlyIncludesActiveSceneObjects()
         {
-            var activeScene = SceneManager.GetActiveScene();
-            var activeObject = new GameObject("ActiveSceneObject");
-            var activeSaveOk = EditorSceneManager.SaveScene(activeScene, "Assets/CodexTemp/RealValidation/SceneDiffActive.unity");
-            Assert.That(activeSaveOk, Is.True);
+            const string testFolder = "Assets/Temp/RealValidation";
 
-            var additiveScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
-            var additiveObject = new GameObject("AdditiveSceneObject");
-            SceneManager.MoveGameObjectToScene(additiveObject, additiveScene);
-            var additiveSaveOk = EditorSceneManager.SaveScene(additiveScene, "Assets/CodexTemp/RealValidation/SceneDiffAdditive.unity");
-            Assert.That(additiveSaveOk, Is.True);
-            var setActiveOk = SceneManager.SetActiveScene(activeScene);
-            Assert.That(setActiveOk, Is.True);
-            Assert.That(SceneManager.GetActiveScene().path, Is.EqualTo(activeScene.path));
-            GameObjectFinder.InvalidateCache();
+            // 确保临时目录存在
+            if (!AssetDatabase.IsValidFolder(testFolder))
+            {
+                var parentFolder = "Assets/Temp";
+                if (!AssetDatabase.IsValidFolder(parentFolder))
+                {
+                    AssetDatabase.CreateFolder("Assets", "Temp");
+                }
+                AssetDatabase.CreateFolder(parentFolder, "RealValidation");
+                AssetDatabase.Refresh();
+            }
 
-            var result = PerceptionSkills.SceneDiff();
-            var json = ToJObject(result);
-            var snapshot = json["snapshot"] as JArray;
+            try
+            {
+                var activeScene = SceneManager.GetActiveScene();
+                var activeObject = new GameObject("ActiveSceneObject");
+                var activeSaveOk = EditorSceneManager.SaveScene(activeScene, "Assets/Temp/RealValidation/SceneDiffActive.unity");
+                Assert.That(activeSaveOk, Is.True);
 
-            Assert.IsTrue(snapshot?.Any(item => item["name"]?.ToString() == "ActiveSceneObject") ?? false);
-            Assert.IsFalse(snapshot?.Any(item => item["name"]?.ToString() == "AdditiveSceneObject") ?? true);
-            Assert.AreEqual(activeScene.name, json["sceneName"]?.ToString());
+                var additiveScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+                var additiveObject = new GameObject("AdditiveSceneObject");
+                SceneManager.MoveGameObjectToScene(additiveObject, additiveScene);
+                var additiveSaveOk = EditorSceneManager.SaveScene(additiveScene, "Assets/Temp/RealValidation/SceneDiffAdditive.unity");
+                Assert.That(additiveSaveOk, Is.True);
+                var setActiveOk = SceneManager.SetActiveScene(activeScene);
+                Assert.That(setActiveOk, Is.True);
+                Assert.That(SceneManager.GetActiveScene().path, Is.EqualTo(activeScene.path));
+                GameObjectFinder.InvalidateCache();
+
+                var result = PerceptionSkills.SceneDiff();
+                var json = ToJObject(result);
+                var snapshot = json["snapshot"] as JArray;
+
+                Assert.IsTrue(snapshot?.Any(item => item["name"]?.ToString() == "ActiveSceneObject") ?? false);
+                Assert.IsFalse(snapshot?.Any(item => item["name"]?.ToString() == "AdditiveSceneObject") ?? true);
+                Assert.AreEqual(activeScene.name, json["sceneName"]?.ToString());
+            }
+            finally
+            {
+                if (AssetDatabase.IsValidFolder(testFolder))
+                {
+                    AssetDatabase.DeleteAsset(testFolder);
+                }
+
+                // 如果 Temp 父目录为空，也删除
+                if (AssetDatabase.IsValidFolder("Assets/Temp"))
+                {
+                    var subFolders = AssetDatabase.GetSubFolders("Assets/Temp");
+                    if (subFolders.Length == 0)
+                    {
+                        AssetDatabase.DeleteAsset("Assets/Temp");
+                    }
+                }
+
+                AssetDatabase.Refresh();
+            }
         }
     }
 }
